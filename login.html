@@ -1,0 +1,151 @@
+
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Connexion - Bloc-notes</title>
+
+<style>
+body {
+    font-family: Arial, sans-serif;
+    margin: 20px;
+    color: #222;
+}
+#auth {
+    max-width: 400px;
+    margin: 50px auto;
+}
+input {
+    width: 100%;
+    padding: 10px;
+    margin: 8px 0;
+    box-sizing: border-box;
+}
+button {
+    padding: 10px 14px;
+    margin: 5px 3px 5px 0;
+    cursor: pointer;
+}
+#message {
+    min-height: 24px;
+    color: #b00020;
+}
+</style>
+</head>
+
+<body>
+
+<section id="auth">
+    <h1>Bloc-notes</h1>
+    <h2>Connexion / Inscription</h2>
+
+    <p>Si vous êtes déjà connecté, patientez.</p>
+
+    <input id="email" type="email"
+        placeholder="Adresse e-mail" autocomplete="email">
+
+    <input id="password" type="password"
+        placeholder="Mot de passe" autocomplete="current-password">
+
+    <button id="login">Se connecter</button>
+    <button id="register">Créer un compte</button>
+
+    <p id="message"></p>
+
+    <button onclick="location.href='accueil.html'">
+        Accueil
+    </button>
+</section>
+
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
+
+<script>
+"use strict";
+
+const firebaseConfig = {
+    apiKey: "AIzaSyC0-YQIPVTUbIW2BUwS0jABwTTyqDs3xrU",
+    authDomain: "bloc-note-3f93f.firebaseapp.com",
+    databaseURL: "https://bloc-note-3f93f-default-rtdb.europe-west1.firebasedatabase.app",
+    projectId: "bloc-note-3f93f",
+    storageBucket: "bloc-note-3f93f.firebasestorage.app",
+    messagingSenderId: "666802568570",
+    appId: "1:666802568570:web:befc1f63eefde0b4e6eac3",
+    measurementId: "G-5DMG7WY17B"
+};
+
+firebase.initializeApp(firebaseConfig);
+
+const auth = firebase.auth();
+
+const emailInput = document.getElementById("email");
+const passwordInput = document.getElementById("password");
+const message = document.getElementById("message");
+
+function translateError(code) {
+    const errors = {
+        "auth/email-already-in-use": "Cette adresse e-mail est déjà utilisée.",
+        "auth/invalid-email": "Adresse e-mail invalide.",
+        "auth/weak-password": "Mot de passe trop faible.",
+        "auth/user-not-found": "Aucun compte trouvé.",
+        "auth/wrong-password": "Mot de passe incorrect.",
+        "auth/invalid-credential": "Adresse e-mail ou mot de passe incorrect.",
+        "auth/too-many-requests": "Trop de tentatives. Réessaie plus tard.",
+        "auth/network-request-failed": "Problème de connexion Internet.",
+        "auth/operation-not-allowed": "Active E-mail/Mot de passe dans Firebase."
+    };
+
+    return errors[code] || "Erreur : " + code;
+}
+
+document.getElementById("register").addEventListener("click", async () => {
+    const email = emailInput.value.trim();
+    const password = passwordInput.value;
+
+    message.textContent = "";
+
+    if (!email || !password) {
+        message.textContent = "Remplis les deux champs.";
+        return;
+    }
+
+    if (password.length < 6) {
+        message.textContent = "Le mot de passe doit contenir au moins 6 caractères.";
+        return;
+    }
+
+    try {
+        await auth.createUserWithEmailAndPassword(email, password);
+    } catch (error) {
+        message.textContent = translateError(error.code);
+    }
+});
+
+document.getElementById("login").addEventListener("click", async () => {
+    const email = emailInput.value.trim();
+    const password = passwordInput.value;
+
+    message.textContent = "";
+
+    if (!email || !password) {
+        message.textContent = "Remplis les deux champs.";
+        return;
+    }
+
+    try {
+        await auth.signInWithEmailAndPassword(email, password);
+    } catch (error) {
+        message.textContent = translateError(error.code);
+    }
+});
+
+auth.onAuthStateChanged(user => {
+    if (user) {
+        location.replace("blocNote.html");
+    }
+});
+</script>
+
+</body>
+</html>
