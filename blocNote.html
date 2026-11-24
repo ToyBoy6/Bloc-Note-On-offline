@@ -1,0 +1,569 @@
+
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bloc-notes</title>
+
+<style>
+:root {
+    --background: #ffffff;
+    --surface: #f0f0f0;
+    --text: #222222;
+    --border: #cccccc;
+    --button: #e8e8e8;
+}
+
+:root[data-theme="dark"] {
+    --background: #171717;
+    --surface: #292929;
+    --text: #eeeeee;
+    --border: #555555;
+    --button: #383838;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 20px;
+    font-family: Arial, sans-serif;
+    color: var(--text);
+    background: var(--background);
+    transition: background 0.2s, color 0.2s;
+}
+
+button, input, textarea {
+    font: inherit;
+    color: var(--text);
+}
+
+button {
+    padding: 9px 13px;
+    cursor: pointer;
+    background: var(--button);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+}
+
+input, textarea {
+    width: 100%;
+    padding: 10px;
+    margin-bottom: 10px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+}
+
+#app {
+    max-width: 900px;
+    margin: auto;
+}
+
+#userInfo {
+    margin: 15px 0;
+    padding: 12px;
+    background: var(--surface);
+    border-radius: 8px;
+}
+
+main {
+    display: flex;
+    gap: 20px;
+}
+
+#sidebar {
+    width: 250px;
+    flex-shrink: 0;
+}
+
+#editor {
+    flex: 1;
+    min-width: 0;
+}
+
+#notes {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.note {
+    width: 100%;
+    text-align: left;
+}
+
+.note.selected {
+    font-weight: bold;
+    border-width: 2px;
+}
+
+textarea {
+    height: 400px;
+    resize: vertical;
+}
+
+#status {
+    font-size: 13px;
+}
+
+[hidden] {
+    display: none !important;
+}
+
+@media (max-width: 600px) {
+    main {
+        flex-direction: column;
+    }
+
+    #sidebar {
+        width: 100%;
+    }
+
+    textarea {
+        height: 300px;
+    }
+}
+</style>
+</head>
+
+<body>
+
+<section id="app" hidden>
+
+    <h1>Bloc-notes</h1>
+
+    <button id="themeButton">Mode sombre</button>
+
+    <div id="userInfo">
+        <p>Connecté en tant que :</p>
+        <strong id="userEmail"></strong>
+        <p id="userUid"></p>
+        <button id="logout">Se déconnecter</button>
+    </div>
+
+    <button id="newNote">Nouvelle note</button>
+
+    <p id="status">Chargement...</p>
+
+    <main>
+        <section id="sidebar">
+            <h2>Mes notes</h2>
+            <input id="search" placeholder="Rechercher une note">
+            <div id="notes"></div>
+        </section>
+
+        <section id="editor">
+            <p id="empty">Aucune note sélectionnée.</p>
+
+            <div id="fields" hidden>
+                <input id="title" placeholder="Titre de la note">
+                <textarea id="content" placeholder="Écris ici..."></textarea>
+                <button id="delete">Supprimer</button>
+            </div>
+        </section>
+    </main>
+
+    <button onclick="location.href='accueil.html'">
+        Accueil
+    </button>
+
+</section>
+
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-database-compat.js"></script>
+
+<script>
+"use strict";
+
+// FIREBASE
+
+const firebaseConfig = {
+    apiKey: "AIzaSyC0-YQIPVTUbIW2BUwS0jABwTTyqDs3xrU",
+    authDomain: "bloc-note-3f93f.firebaseapp.com",
+    databaseURL: "https://bloc-note-3f93f-default-rtdb.europe-west1.firebasedatabase.app",
+    projectId: "bloc-note-3f93f",
+    storageBucket: "bloc-note-3f93f.firebasestorage.app",
+    messagingSenderId: "666802568570",
+    appId: "1:666802568570:web:befc1f63eefde0b4e6eac3",
+    measurementId: "G-5DMG7WY17B"
+};
+
+firebase.initializeApp(firebaseConfig);
+
+const auth = firebase.auth();
+const database = firebase.database();
+
+// ÉLÉMENTS
+
+const app = document.getElementById("app");
+const userEmail = document.getElementById("userEmail");
+const userUid = document.getElementById("userUid");
+
+const notesContainer = document.getElementById("notes");
+const searchInput = document.getElementById("search");
+
+const titleInput = document.getElementById("title");
+const contentInput = document.getElementById("content");
+
+const fields = document.getElementById("fields");
+const emptyMessage = document.getElementById("empty");
+const status = document.getElementById("status");
+const themeButton = document.getElementById("themeButton");
+
+// VARIABLES
+
+let currentUser = null;
+let notes = [];
+let selectedId = null;
+
+let notesReference = null;
+let themeReference = null;
+
+let saveTimer = null;
+let applyingRemoteData = false;
+let currentTheme = "light";
+
+// STOCKAGE LOCAL
+
+function localStorageKey() {
+    return "bloc-notes-" + currentUser.uid;
+}
+
+function loadLocalNotes() {
+    try {
+        const data = JSON.parse(
+            localStorage.getItem(localStorageKey()) || "[]"
+        );
+
+        return Array.isArray(data) ? data : [];
+    } catch {
+        return [];
+    }
+}
+
+function saveLocalNotes() {
+    if (!currentUser) return;
+
+    localStorage.setItem(
+        localStorageKey(),
+        JSON.stringify(notes)
+    );
+}
+
+// THÈME
+
+function applyTheme(theme) {
+    currentTheme = theme === "dark" ? "dark" : "light";
+
+    document.documentElement.dataset.theme = currentTheme;
+
+    themeButton.textContent =
+        currentTheme === "dark"
+            ? "Mode clair"
+            : "Mode sombre";
+}
+
+function startTheme() {
+    themeReference = database.ref(
+        "users/" + currentUser.uid + "/preferences/theme"
+    );
+
+    const cachedTheme = localStorage.getItem(
+        "bloc-notes-theme-" + currentUser.uid
+    );
+
+    applyTheme(cachedTheme || "light");
+
+    themeReference.once("value")
+    .then(snapshot => {
+        if (!currentUser) return;
+
+        if (!snapshot.exists()) {
+            return themeReference.set("light");
+        }
+
+        applyTheme(snapshot.val());
+    })
+    .catch(error => {
+        console.error(error);
+    });
+
+    themeReference.on("value", snapshot => {
+        if (!currentUser) return;
+
+        const theme = snapshot.val() || "light";
+
+        applyTheme(theme);
+
+        localStorage.setItem(
+            "bloc-notes-theme-" + currentUser.uid,
+            currentTheme
+        );
+    });
+}
+
+themeButton.addEventListener("click", async () => {
+    if (!currentUser || !themeReference) return;
+
+    const newTheme =
+        currentTheme === "dark" ? "light" : "dark";
+
+    applyTheme(newTheme);
+
+    localStorage.setItem(
+        "bloc-notes-theme-" + currentUser.uid,
+        newTheme
+    );
+
+    try {
+        await themeReference.set(newTheme);
+    } catch (error) {
+        console.error(error);
+        status.textContent = "Impossible d'enregistrer le thème.";
+    }
+});
+
+// NOTES
+
+function getSelectedNote() {
+    return notes.find(note => note.id === selectedId);
+}
+
+function renderNotes() {
+    const query = searchInput.value.toLowerCase();
+
+    notesContainer.replaceChildren();
+
+    notes.filter(note => {
+        const text =
+            (note.title || "") + " " + (note.content || "");
+
+        return text.toLowerCase().includes(query);
+    }).forEach(note => {
+        const button = document.createElement("button");
+
+        button.className = "note";
+        button.textContent = note.title || "Sans titre";
+
+        if (note.id === selectedId) {
+            button.classList.add("selected");
+        }
+
+        button.addEventListener("click", () => {
+            selectedId = note.id;
+            render();
+        });
+
+        notesContainer.appendChild(button);
+    });
+}
+
+function renderEditor() {
+    const note = getSelectedNote();
+
+    fields.hidden = !note;
+    emptyMessage.hidden = !!note;
+
+    if (note) {
+        titleInput.value = note.title || "";
+        contentInput.value = note.content || "";
+    }
+}
+
+function render() {
+    renderNotes();
+    renderEditor();
+}
+
+function saveNotes() {
+    if (!currentUser || !notesReference || applyingRemoteData) return;
+
+    saveLocalNotes();
+
+    status.textContent = "Enregistrement...";
+
+    notesReference.set(notes)
+    .then(() => {
+        status.textContent = "Synchronisé.";
+    })
+    .catch(error => {
+        console.error(error);
+        status.textContent = "Erreur de sauvegarde.";
+    });
+}
+
+function createNote() {
+    const note = {
+        id: crypto.randomUUID(),
+        title: "",
+        content: "",
+        updatedAt: Date.now()
+    };
+
+    notes.unshift(note);
+    selectedId = note.id;
+
+    saveNotes();
+    render();
+
+    titleInput.focus();
+}
+
+function updateNote() {
+    const note = getSelectedNote();
+
+    if (!note) return;
+
+    note.title = titleInput.value;
+    note.content = contentInput.value;
+    note.updatedAt = Date.now();
+
+    saveLocalNotes();
+
+    clearTimeout(saveTimer);
+
+    saveTimer = setTimeout(() => {
+        saveNotes();
+        renderNotes();
+    }, 400);
+}
+
+function deleteNote() {
+    if (!getSelectedNote()) return;
+
+    if (!confirm("Supprimer cette note ?")) return;
+
+    notes = notes.filter(note => note.id !== selectedId);
+    selectedId = null;
+
+    saveNotes();
+    render();
+}
+
+// DÉMARRAGE DES NOTES
+
+async function startNotes() {
+    notes = loadLocalNotes();
+
+    selectedId = notes.length ? notes[0].id : null;
+    render();
+
+    notesReference = database.ref(
+        "users/" + currentUser.uid + "/notes"
+    );
+
+    status.textContent = "Chargement des notes...";
+
+    try {
+        const snapshot = await notesReference.once("value");
+
+        if (!currentUser) return;
+
+        if (snapshot.exists()) {
+            const data = snapshot.val();
+            notes = Array.isArray(data) ? data : [];
+        } else {
+            await notesReference.set(notes);
+        }
+
+        saveLocalNotes();
+
+        if (!notes.some(note => note.id === selectedId)) {
+            selectedId = notes.length ? notes[0].id : null;
+        }
+
+        render();
+
+        notesReference.on("value", snapshot => {
+            if (!currentUser) return;
+
+            applyingRemoteData = true;
+
+            const data = snapshot.val();
+            notes = Array.isArray(data) ? data : [];
+
+            saveLocalNotes();
+
+            if (!notes.some(note => note.id === selectedId)) {
+                selectedId = notes.length ? notes[0].id : null;
+            }
+
+            render();
+
+            applyingRemoteData = false;
+            status.textContent = "Synchronisé.";
+        }, error => {
+            console.error(error);
+            status.textContent = "Erreur de synchronisation.";
+        });
+
+        status.textContent = "Synchronisé.";
+
+    } catch (error) {
+        console.error(error);
+        status.textContent = "Impossible de charger les notes.";
+    }
+}
+
+// AUTHENTIFICATION
+
+auth.onAuthStateChanged(user => {
+    clearTimeout(saveTimer);
+
+    if (notesReference) {
+        notesReference.off();
+        notesReference = null;
+    }
+
+    if (themeReference) {
+        themeReference.off();
+        themeReference = null;
+    }
+
+    currentUser = user;
+
+    if (!user) {
+        location.replace("connexion.html");
+        return;
+    }
+
+    app.hidden = false;
+
+    userEmail.textContent = user.email;
+    userUid.textContent = "UID : " + user.uid;
+
+    startTheme();
+    startNotes();
+});
+
+// BOUTONS
+
+document.getElementById("logout").addEventListener("click", async () => {
+    clearTimeout(saveTimer);
+
+    try {
+        await auth.signOut();
+    } catch (error) {
+        console.error(error);
+        status.textContent = "Erreur de déconnexion.";
+    }
+});
+
+document.getElementById("newNote")
+.addEventListener("click", createNote);
+
+document.getElementById("delete")
+.addEventListener("click", deleteNote);
+
+titleInput.addEventListener("input", updateNote);
+contentInput.addEventListener("input", updateNote);
+searchInput.addEventListener("input", renderNotes);
+
+</script>
+
+</body>
+</html>
